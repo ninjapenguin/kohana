@@ -19,7 +19,7 @@ i18n::$lang = 'en_US';
 /**
  * Set the routes.
  */
-Route::set('default', '(<controller>(/<action>(/<id>)))')
+Route::add('default', '(<controller>(/<action>(/<id>)))')
 	->defaults(array(
 		'controller' => 'welcome',
 		'action' => 'index',
