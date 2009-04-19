@@ -3,13 +3,21 @@
 /**
  * Initialize Kohana
  */
-Kohana::init(array('charset' => 'utf-8'));
+Kohana::init(array('charset' => 'utf-8', 'base_url' => '/ko3/'));
 
 /**
  * Enable modules.
  */
 Kohana::modules(array(
-	'database' => MODPATH.'database'));
+	// 'orm'      => MODPATH.'orm',
+	// 'database' => MODPATH.'database',
+	'todoist'  => MODPATH.'todoist',
+	));
+
+/**
+ * Log all messages to files
+ */
+Kohana::$log->attach(new Kohana_Log_File(APPPATH.'logs'));
 
 /**
  * Set the language to use for translating.
