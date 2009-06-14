@@ -1,9 +1,9 @@
 <?php
 /**
- * Routes are used to determine the controller and method for a requested URI.
+ * Routes are used to determine the controller and action for a requested URI.
  * Every route generates a regular expression which is used to match a URI
  * and a route. Routes may also contain keys which can be used to set the
- * controller, method, and method arguments.
+ * controller, action, and parameters.
  *
  * Each <key> will be translated to a regular expression using a default
  * regular expression pattern. You can override the default pattern by providing
@@ -19,7 +19,7 @@
  * the URI definition:
  *
  *     // This is the standard default route, and no keys are required
- *     Route::default('(<controller>(/<method>(/<id>)))');
+ *     Route::default('(<controller>(/<action>(/<id>)))');
  *
  *     // This route only requires the :file key
  *     Route::factory('(<path>/)<file>(<format>)', array('path' => '.*', 'format' => '\.\w+'));
@@ -65,7 +65,7 @@ class Route_Core {
 	 * @param   array    regex patterns for route keys
 	 * @return  Route
 	 */
-	public static function add($name, $uri, array $regex = NULL)
+	public static function set($name, $uri, array $regex = NULL)
 	{
 		return Route::$_routes[$name] = new Route($uri, $regex);
 	}
@@ -95,14 +95,11 @@ class Route_Core {
 	// Route URI string
 	protected $_uri = '';
 
-	// Controller directory
-	protected $_directory;
-
 	// Regular expressions for route keys
 	protected $_regex = array();
 
 	// Default values for route keys
-	protected $_defaults = array('method' => 'index');
+	protected $_defaults = array('action' => 'index');
 
 	// Compiled regex cache
 	protected $_route_regex;
@@ -121,13 +118,16 @@ class Route_Core {
 		// Store the URI that this route will match
 		$this->_uri = $uri;
 
-		if (($regex = Kohana::cache('kohana_route:'.$uri)) === NULL)
+		// Set the cache key
+		$cache_key = 'route::compile("'.$uri.'")';
+
+		if (($regex = Kohana::cache($cache_key)) === NULL)
 		{
 			// Compile the complete regex for this uri
 			$regex = $this->_compile();
 
 			// Cache the compiled regex
-			Kohana::cache('kohana_route:'.$uri, $regex);
+			Kohana::cache($cache_key, $regex);
 		}
 
 		// Store the compiled regex locally
@@ -135,23 +135,10 @@ class Route_Core {
 	}
 
 	/**
-	 * Sets the prefix directory for all controllers matched by this route.
-	 *
-	 * @param   string  directory path
-	 * @return  Route
-	 */
-	public function directory($directory = NULL)
-	{
-		$this->_directory = strtolower($directory);
-
-		return $this;
-	}
-
-	/**
 	 * Provides default values for keys when they are not present. The default
-	 * method will always be "index" unless it is overloaded with this method.
+	 * action will always be "index" unless it is overloaded here.
 	 *
-	 *     $route->defaults(array('controller' => 'welcome', 'method' => 'index'));
+	 *     $route->defaults(array('controller' => 'welcome', 'action' => 'index'));
 	 *
 	 * @chainable
 	 * @param   array  key values
@@ -159,7 +146,7 @@ class Route_Core {
 	 */
 	public function defaults(array $defaults = NULL)
 	{
-		if (empty($defaults['action']))
+		if ( ! isset($defaults['action']))
 		{
 			$defaults['action'] = 'index';
 		}
@@ -174,13 +161,10 @@ class Route_Core {
 	 * all of the routed parameters as an array. A failed match will return
 	 * boolean FALSE.
 	 *
-	 *     // This route will only match if the <controller>, <method>, and <id> exist
-	 *     $params = Route::factory('<controller>/<method>/<id>', array('id' => '\d+'))
+	 *     // This route will only match if the <controller>, <action>, and <id> exist
+	 *     $params = Route::factory('<controller>/<action>/<id>', array('id' => '\d+'))
 	 *         ->match('users/edit/10');
-	 *     // The parameters are now:
-	 *     // controller = users
-	 *     // method = edit
-	 *     // id = 10
+	 *     // The parameters are now: controller = users, action = edit, id = 10
 	 *
 	 * This method should almost always be used within an if/else block:
 	 *
@@ -220,15 +204,6 @@ class Route_Core {
 			}
 		}
 
-		if ( ! empty($this->_directory))
-		{
-			// Create the class prefix
-			$prefix = str_replace(array('\\', '/'), '_', $this->_directory);
-
-			// Add the prefix to the controller
-			$params['controller'] = $prefix.'_'.$params['controller'];
-		}
-
 		return $params;
 	}
 
@@ -237,12 +212,14 @@ class Route_Core {
 	 *
 	 * @param   array   URI parameters
 	 * @return  string
-	 * @throws  Kohana_Exception  when the URI will not match the current route
 	 */
 	public function uri(array $params = NULL)
 	{
 		if ($params === NULL)
+		{
+			// Use the default parameters
 			$params = $this->_defaults;
+		}
 
 		// Start with the routed URI
 		$uri = $this->_uri;
@@ -274,12 +251,6 @@ class Route_Core {
 		// Trim off extra slashes
 		$uri = rtrim($uri, '/');
 
-		if ( ! preg_match($this->_route_regex, $uri))
-		{
-			// This will generally happen with the user supplies invalid parameters
-			throw new Exception('The generated URI "'.$uri.'" will not be matched by "'.$this->_uri.'"');
-		}
-
 		return $uri;
 	}
 
@@ -287,6 +258,7 @@ class Route_Core {
 	 * Returns the compiled regular expression for the route. This translates
 	 * keys and optional groups to a proper PCRE regular expression.
 	 *
+	 * @access  protected
 	 * @return  string
 	 */
 	protected function _compile()

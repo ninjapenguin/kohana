@@ -2,8 +2,6 @@
 
 return array
 (
-	'database' => array
-	(
-		'group' => 'default',
-	),
+	'Spanish' => 'Español',
+	'Hello, world' => 'Hola, mundo',
 );

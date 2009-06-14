@@ -31,8 +31,8 @@ class Session_Database_Core extends Session {
 	{
 		if ( ! isset($config['group']))
 		{
-			throw new Kohana_Exception('You must define the :name parameter in your session configuration',
-				array(':name' => 'group'));
+			// Use the default group
+			$config['group'] = 'default';
 		}
 
 		// Load the database
@@ -50,13 +50,14 @@ class Session_Database_Core extends Session {
 	/**
 	 * Loads the session data from the database.
 	 *
+	 * @param   string   session id
 	 * @return  string
 	 */
-	public function _read()
+	public function _read($id = NULL)
 	{
-		if ($id = cookie::get($this->_name))
+		if ($id OR $id = cookie::get($this->_name))
 		{
-			$result = DB::query(Database::SELECT, 'SELECT data FROM '.$this->_table.' WHERE session_id = :id LIMIT 1')
+			$result = DB::query(Database::SELECT, "SELECT data FROM {$this->_table} WHERE session_id = :id LIMIT 1")
 				->set(':id', $id)
 				->execute($this->_db);
 
@@ -64,8 +65,6 @@ class Session_Database_Core extends Session {
 			{
 				// Set the current session id
 				$this->_session_id = $this->_update_id = $id;
-
-				echo Kohana::debug('loaded data');
 
 				// Return the data string
 				return $result->get('data');
@@ -85,7 +84,21 @@ class Session_Database_Core extends Session {
 	 */
 	protected function _regenerate()
 	{
-		return $this->_session_id = uniqid(NULL, TRUE);
+		// Create the query to find an ID
+		$query = DB::query(Database::SELECT, "SELECT session_id FROM {$this->_table} WHERE session_id = :id LIMIT 1")
+			->bind(':id' => $id);
+
+		do
+		{
+			// Create a new session id
+			$id = uniqid(NULL, TRUE);
+
+			// Get the the id from the database
+			$result = $query->execute($this->_db);
+		}
+		while ($result->count() > 0);
+
+		return $this->_session_id = $id;
 	}
 
 	/**

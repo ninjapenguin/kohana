@@ -10,7 +10,7 @@
 class Request_Core {
 
 	// HTTP status codes and messages
-	protected static $messages = array(
+	public static $messages = array(
 		// Informational 1xx
 		100 => 'Continue',
 		101 => 'Switching Protocols',
@@ -64,8 +64,30 @@ class Request_Core {
 		509 => 'Bandwidth Limit Exceeded'
 	);
 
-	// Main request instance
-	protected static $_instance;
+	/**
+	 * @var  string  method: GET, POST, PUT, DELETE, etc
+	 */
+	public static $method = 'GET';
+
+	/**
+	 * @var  string  protocol: http, https, ftp, cli, etc
+	 */
+	public static $protocol = 'http';
+
+	/**
+	 * @var  string  referring URL
+	 */
+	public static $referrer;
+
+	/**
+	 * @var  boolean  AJAX-generated request
+	 */
+	public static $is_ajax = FALSE;
+
+	/**
+	 * @var  Request  primary request
+	 */
+	public static $instance;
 
 	/**
 	 * Main request singleton instance. If no URI is provided, the URI will
@@ -76,13 +98,13 @@ class Request_Core {
 	 */
 	public static function instance( & $uri = FALSE)
 	{
-		if (Request::$_instance === NULL)
+		if (Request::$instance === NULL)
 		{
-			// Create the initial request parameters
-			$params = array('method' => 'GET', 'get' => NULL, 'post' => NULL);
-
 			if (Kohana::$is_cli)
 			{
+				// Default protocol for command line is cli://
+				Request::$protocol = 'cli';
+
 				// Get the command line options
 				$options = cli::options('uri', 'method', 'get', 'post');
 
@@ -94,20 +116,20 @@ class Request_Core {
 
 				if (isset($options['method']))
 				{
-					// Request method specified
-					$params['method'] = $options['method'];
+					// Use the specified method
+					Request::$method = strtoupper($options['method']);
 				}
 
 				if (isset($options['get']))
 				{
-					// GET data specified
-					parse_str($options['get'], $params['get']);
+					// Overload the global GET data
+					parse_str($options['get'], $_GET);
 				}
 
 				if (isset($options['post']))
 				{
-					// POST data specified
-					parse_str($options['post'], $params['post']);
+					// Overload the global POST data
+					parse_str($options['post'], $_POST);
 				}
 			}
 			else
@@ -115,97 +137,251 @@ class Request_Core {
 				if (isset($_SERVER['REQUEST_METHOD']))
 				{
 					// Use the server request method
-					$params['method'] = $_SERVER['REQUEST_METHOD'];
+					Request::$method = $_SERVER['REQUEST_METHOD'];
 				}
 
-				if ($params['method'] !== 'GET' AND $params['method'] !== 'POST')
+				if ( ! empty($_SERVER['HTTPS']) AND filter_var($_SERVER['HTTPS'], FILTER_VALIDATE_BOOLEAN))
+				{
+					// This request is secure
+					Request::$protocol = 'https';
+				}
+
+				if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) AND strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')
+				{
+					// This request is an AJAX request
+					Request::$is_ajax = TRUE;
+				}
+
+				if (isset($_SERVER['HTTP_REFERER']))
+				{
+					// There is a referrer for this request
+					Request::$referrer = $_SERVER['HTTP_REFERER'];
+				}
+
+				if (Request::$method !== 'GET' AND Request::$method !== 'POST')
 				{
 					// Methods besides GET and POST do not properly parse the form-encoded
-					// query string into the $_POST array, so we do it manually.
-					parse_str(file_get_contents('php://input'), $params['post']);
+					// query string into the $_POST array, so we overload it manually.
+					parse_str(file_get_contents('php://input'), $_POST);
 				}
-			}
 
-			if ($uri === FALSE)
-			{
-				if (isset($_SERVER['PATH_INFO']))
+				if ($uri === FALSE)
 				{
-					// PATH_INFO is most realiable way to handle routing, as it
-					// does not include the document root or index file
-					$uri = $_SERVER['PATH_INFO'];
-				}
-				else
-				{
-					// REQUEST_URI and PHP_SELF both provide the full path,
-					// including the document root and index file
-					if (isset($_SERVER['REQUEST_URI']))
+					if (isset($_SERVER['PATH_INFO']))
 					{
-						$uri = $_SERVER['REQUEST_URI'];
+						// PATH_INFO is most realiable way to handle routing, as it
+						// does not include the document root or index file
+						$uri = $_SERVER['PATH_INFO'];
 					}
-					elseif (isset($_SERVER['PHP_SELF']))
+					else
 					{
-						$uri = $_SERVER['PHP_SELF'];
-					}
+						// REQUEST_URI and PHP_SELF both provide the full path,
+						// including the document root and index file
+						if (isset($_SERVER['REQUEST_URI']))
+						{
+							$uri = $_SERVER['REQUEST_URI'];
+						}
+						elseif (isset($_SERVER['PHP_SELF']))
+						{
+							$uri = $_SERVER['PHP_SELF'];
+						}
 
-					if (isset($_SERVER['SCRIPT_NAME']) AND strpos($uri, $_SERVER['SCRIPT_NAME']) === 0)
-					{
-						// Remove the document root and index file from the URI
-						$uri = substr($uri, strlen($_SERVER['SCRIPT_NAME']));
+						if (isset($_SERVER['SCRIPT_NAME']) AND strpos($uri, $_SERVER['SCRIPT_NAME']) === 0)
+						{
+							// Remove the document root and index file from the URI
+							$uri = substr($uri, strlen($_SERVER['SCRIPT_NAME']));
+						}
 					}
 				}
 			}
 
 			// Create the instance singleton
-			Request::$_instance = new Request($uri, $params);
+			Request::$instance = new Request($uri);
 		}
 
-		return Request::$_instance;
+		return Request::$instance;
 	}
 
 	/**
-	 * Creates a new request object for the given URI. Global GET and POST data
-	 * can be overloaded.
+	 * Creates a new request object for the given URI.
 	 *
 	 * @chainable
 	 * @param   string  URI of the request
-	 * @param   array   overloaded GET data
-	 * @param   array   overloaded POST data
 	 * @return  Request
 	 */
-	public static function factory($uri, array $params = NULL)
+	public static function factory($uri)
 	{
-		return new Request($uri, $params);
+		return new Request($uri);
 	}
 
 	/**
-	 * @var  object  route used for this request
+	 * Returns the accepted content types. If a specific type is defined,
+	 * the quality of that type will be returned.
+	 *
+	 * @param   string  content MIME type
+	 * @return  float   when checking a specific type
+	 * @return  array
+	 */
+	public static function accept_type($type = NULL)
+	{
+		static $accepts;
+
+		if ($accepts === NULL)
+		{
+			// Parse the HTTP_ACCEPT header
+			$accepts = Request::_parse_accept($_SERVER['HTTP_ACCEPT'], array('*/*' => 1.0));
+		}
+
+		if (isset($type))
+		{
+			// Return the quality setting for this type
+			return isset($accepts[$type]) ? $accepts[$type] : $accepts['*/*'];
+		}
+
+		return $accepts;
+	}
+
+	/**
+	 * Returns the accepted languages. If a specific language is defined,
+	 * the quality of that language will be returned. If the language is not
+	 * accepted, FALSE will be returned.
+	 *
+	 * @param   string  language code
+	 * @return  float   when checking a specific language
+	 * @return  array
+	 */
+	public static function accept_lang($lang = NULL)
+	{
+		static $accepts;
+
+		if ($accepts === NULL)
+		{
+			// Parse the HTTP_ACCEPT_LANGUAGE header
+			$accepts = Request::_parse_accept($_SERVER['HTTP_ACCEPT_LANGUAGE']);
+		}
+
+		if (isset($lang))
+		{
+			// Return the quality setting for this lang
+			return isset($accepts[$lang]) ? $accepts[$lang] : FALSE;
+		}
+
+		return $accepts;
+	}
+
+	/**
+	 * Returns the accepted encodings. If a specific encoding is defined,
+	 * the quality of that encoding will be returned. If the encoding is not
+	 * accepted, FALSE will be returned.
+	 *
+	 * @param   string  encoding type
+	 * @return  float   when checking a specific encoding
+	 * @return  array
+	 */
+	public static function accept_encoding($type = NULL)
+	{
+		static $accepts;
+
+		if ($accepts === NULL)
+		{
+			// Parse the HTTP_ACCEPT_LANGUAGE header
+			$accepts = Request::_parse_accept($_SERVER['HTTP_ACCEPT_ENCODING']);
+		}
+
+		if (isset($type))
+		{
+			// Return the quality setting for this type
+			return isset($accepts[$type]) ? $accepts[$type] : FALSE;
+		}
+
+		return $accepts;
+	}
+
+	/**
+	 * Parses an accept header and returns an array (type => quality) of the
+	 * accepted types, ordered by quality.
+	 *
+	 * @param   string   header to parse
+	 * @param   array    default values
+	 * @return  array
+	 */
+	protected static function _parse_accept( & $header, array $accepts = NULL)
+	{
+		if ( ! empty($header))
+		{
+			// Get all of the types
+			$types = explode(',', $header);
+
+			foreach ($types as $type)
+			{
+				// Split the type into parts
+				$parts = explode(';', $type);
+
+				// Make the type only the MIME
+				$type = trim(array_shift($parts));
+
+				// Default quality is 1.0
+				$quality = 1.0;
+
+				foreach ($parts as $part)
+				{
+					// Prevent undefined $value notice below
+					if (strpos($part, '=') === FALSE)
+						continue;
+
+					// Separate the key and value
+					list ($key, $value) = explode('=', trim($part));
+
+					if ($key === 'q')
+					{
+						// There is a quality for this type
+						$quality = (float) trim($value);
+					}
+				}
+
+				// Add the accept type and quality
+				$accepts[$type] = $quality;
+			}
+		}
+
+		// Make sure that accepts is an array
+		$accepts = (array) $accepts;
+
+		// Order by quality
+		arsort($accepts);
+
+		return $accepts;
+	}
+
+	/**
+	 * @var  object  route matched for this request
 	 */
 	public $route;
 
 	/**
-	 * @var  string  request method type (GET, POST, PUT, etc)
-	 */
-	public $method = 'GET';
-
-	/**
-	 * @var  decimal  HTTP version (1.0, 1.1)
+	 * @var  decimal  HTTP version: 1.0, 1.1, etc
 	 */
 	public $version = 1.1;
 
 	/**
-	 * @var  integer  HTTP response code (200, 404, 500, etc)
+	 * @var  integer  HTTP response code: 200, 404, 500, etc
 	 */
 	public $status = 200;
 
 	/**
 	 * @var  string  response body
 	 */
-	public $response;
+	public $response = '';
 
 	/**
 	 * @var  array  headers to send with the response body
 	 */
 	public $headers = array('content-type' => 'text/html; charset=utf-8');
+
+	/**
+	 * @var  string  controller directory
+	 */
+	public $directory = '';
 
 	/**
 	 * @var  string  controller to be executed
@@ -225,33 +401,16 @@ class Request_Core {
 	// Parameters extracted from the route
 	protected $_params;
 
-	// Request GET and POST data
-	protected $_get;
-	protected $_post;
-
 	/**
 	 * Creates a new request object for the given URI. Global GET and POST data
 	 * can be overloaded by setting "get" and "post" in the parameters.
 	 *
 	 * @param   string  URI of the request
-	 * @param   array   request parameters
 	 * @return  void
 	 * @throws  Kohana_Exception  if no route matches the URI
 	 */
-	public function __construct($uri, array $params = NULL)
+	public function __construct($uri)
 	{
-		if (isset($params['method']))
-		{
-			// Set the request method
-			$this->method = strtoupper($params['method']);
-		}
-
-		// Load GET data
-		$this->_get = isset($params['get']) ? $params['get'] : $_GET;
-
-		// Load POST data
-		$this->_post = isset($params['post']) ? $params['post'] : $_POST;
-
 		// Remove trailing slashes from the URI
 		$uri = trim($uri, '/');
 
@@ -268,12 +427,18 @@ class Request_Core {
 				// Store the matching route
 				$this->route = $route;
 
+				if (isset($params['directory']))
+				{
+					// Controllers are in a sub-directory
+					$this->directory = $params['directory'];
+				}
+
 				// Store the controller and action
 				$this->controller = $params['controller'];
 				$this->action     = $params['action'];
 
 				// These are accessible as public vars and can be overloaded
-				unset($params['controller'], $params['action']);
+				unset($params['controller'], $params['action'], $params['directory']);
 
 				// Params cannot be changed once matched
 				$this->_params = $params;
@@ -283,6 +448,40 @@ class Request_Core {
 		}
 
 		throw new Kohana_Exception('Unable to find a route to handle :uri', array(':uri' => $uri));
+	}
+
+	/**
+	 * Generates a complete URL for the current route.
+	 *
+	 * @param   array   additional route parameters
+	 * @return  string
+	 */
+	public function url(array $params = NULL)
+	{
+		return Kohana::$base_url.$this->uri($params);
+	}
+
+	/**
+	 * Generates a relative URI for the current route.
+	 *
+	 * @param   array   additional route parameters
+	 * @return  string
+	 */
+	public function uri(array $params = NULL)
+	{
+		if ( ! isset($params['controller']))
+		{
+			// Add the current controller
+			$params['controller'] = $this->controller;
+		}
+
+		if ( ! isset($params['action']))
+		{
+			// Add the current action
+			$params['action'] = $this->action;
+		}
+
+		return $this->route->uri($params);
 	}
 
 	/**
@@ -304,42 +503,6 @@ class Request_Core {
 	}
 
 	/**
-	 * Retrieves a value from GET data.
-	 *
-	 * @param   string   key of the value
-	 * @param   mixed    default value if the key is not set
-	 * @return  mixed
-	 */
-	public function get($key = NULL, $default = NULL)
-	{
-		if ($key === NULL)
-		{
-			// Return the full array
-			return $this->_get;
-		}
-
-		return isset($this->_get[$key]) ? $this->_get[$key] : $default;
-	}
-
-	/**
-	 * Retrieves a value from POST data.
-	 *
-	 * @param   string   key of the value
-	 * @param   mixed    default value if the key is not set
-	 * @return  mixed
-	 */
-	public function post($key = NULL, $default = NULL)
-	{
-		if ($key === NULL)
-		{
-			// Return the full array
-			return $this->_post;
-		}
-
-		return isset($this->_post[$key]) ? $this->_post[$key] : $default;
-	}
-
-	/**
 	 * Gets an named header.
 	 *
 	 * @param   string   header name
@@ -355,7 +518,8 @@ class Request_Core {
 	}
 
 	/**
-	 * Sets an named header.
+	 * Sets an named header. Use NULL as the header value to remove it from
+	 * the header list.
 	 *
 	 * @param   string   header name
 	 * @param   string   header value
@@ -366,8 +530,16 @@ class Request_Core {
 		// The header name is always stored lowercase
 		$name = strtolower($name);
 
-		// Add the header to the list
-		$this->headers[$name] = $value;
+		if ($value === NULL)
+		{
+			// Remove the header
+			unset($this->headers[$name]);
+		}
+		else
+		{
+			// Add the header to the list
+			$this->headers[$name] = $value;
+		}
 
 		return $this;
 	}
@@ -386,52 +558,145 @@ class Request_Core {
 	}
 
 	/**
-	 * Deletes a named header.
-	 *
-	 * @param   string   header name
-	 * @return  $this
-	 */
-	public function delete_header($name)
-	{
-		// The header name is always stored lowercase
-		$name = strtolower($name);
-
-		// Remove the header from the list
-		unset($this->_headers[$name]);
-
-		return $this;
-	}
-
-	/**
 	 * Sends the response status and all set headers.
 	 *
 	 * @return  $this
 	 */
 	public function send_headers()
 	{
-		// Get the status message
-		$message = Request::$messages[$this->status];
-
-		// Send the HTTP status message
-		header("HTTP/{$this->version} {$this->status} {$message}", TRUE, $this->status);
-
-		foreach ($this->headers as $name => $value)
+		if ( ! headers_sent())
 		{
-			if (is_string($name))
+			// Get the status message
+			$message = Request::$messages[$this->status];
+
+			// Send the HTTP status message
+			header("HTTP/{$this->version} {$this->status} {$message}", TRUE, $this->status);
+
+			foreach ($this->headers as $name => $value)
 			{
-				// Convert the header name to Title-Case, to match RFC spec
-				$name = str_replace('-', ' ', $name);
-				$name = str_replace(' ', '-', ucwords($name));
+				if (is_string($name))
+				{
+					// Convert the header name to Title-Case, to match RFC spec
+					$name = str_replace('-', ' ', $name);
+					$name = str_replace(' ', '-', ucwords($name));
 
-				// Combine the name and value to make a raw header
-				$value = "{$name}: {$value}";
+					// Combine the name and value to make a raw header
+					$value = "{$name}: {$value}";
+				}
+
+				// Send the raw header
+				header($value, TRUE);
 			}
-
-			// Send the raw header
-			header($value, TRUE);
 		}
 
 		return $this;
+	}
+
+	/**
+	 * Redirects as the request response.
+	 *
+	 * @param   string   redirect location
+	 * @param   integer  status code
+	 * @return  void
+	 */
+	public function redirect($url, $code = 302)
+	{
+		// Set the response status
+		$this->status = $code;
+
+		// Set the location header
+		$this->set_header('location', $url);
+
+		// Send headers
+		$this->send_headers();
+
+		// Stop execution
+		exit(0);
+	}
+
+	/**
+	 * Sends a file as the request response.
+	 *
+	 * @param   string   file path
+	 * @param   string   download file name
+	 * @param   boolean  allow the download to be resumed
+	 * @return  void
+	 */
+	public function send_file($filename, $nicename = NULL, $resumable = TRUE)
+	{
+		// Get the complete file path
+		$filename = realpath($filename);
+
+		if (empty($nicename))
+		{
+			// Use the file name as the nice name
+			$nicename = pathinfo($filename, PATHINFO_BASENAME);
+		}
+
+		// Get the file size
+		$size = filesize($filename);
+
+		// Set the starting offset and length to send
+		$ranges = NULL;
+
+		if ($resumable)
+		{
+			if (isset($_SERVER['HTTP_RANGE']))
+			{
+				// @todo: ranged download processing
+			}
+
+			// Accept accepted range type
+			$this->set_header('accept-ranges', 'bytes');
+		}
+
+		// Set the headers
+		$this->set_header('content-disposition', 'attachment; filename="'.$nicename.'"');
+
+		// Set the content type of the response
+		$this->set_header('content-type', file::mime($filename));
+
+		// Set the content size in bytes
+		$this->set_header('content-length', $size);
+
+		// Send all headers now
+		$this->send_headers();
+
+		while (ob_get_level())
+		{
+			// Flush all output buffers
+			ob_end_flush();
+		}
+
+		// Manually stop execution
+		ignore_user_abort(TRUE);
+
+		// Keep the script running forever
+		set_time_limit(0);
+
+		// Open the file for reading
+		$file = fopen($filename, 'rb');
+
+		// Send data in 16kb blocks
+		$block = 1024 * 16;
+
+		while ( ! feof($file))
+		{
+			if (connection_aborted())
+				break;
+
+			// Output a block of the file
+			echo fread($file, $block);
+
+			// Send the data now
+			flush();
+		}
+
+		// Close the file
+		fclose($file);
+
+		// Stop execution
+		exit(0);
 	}
 
 	/**
@@ -443,39 +708,63 @@ class Request_Core {
 	 * By default, the output from the controller is captured and returned, and
 	 * no headers are sent.
 	 *
-	 * @param   boolean   capture the output and return it
-	 * @return  string    for captured output
-	 * @return  void      for displayed output
+	 * @return  $this
 	 */
-	public function execute($capture = TRUE)
+	public function execute()
 	{
-		// Set the controller class name
-		$controller = 'controller_'.$this->controller;
+		// Create the class prefix
+		$prefix = 'controller_';
 
-		// Load the controller
-		$controller = new $controller($this);
+		if ( ! empty($this->directory))
+		{
+			// Add the directory name to the class prefix
+			$prefix .= str_replace(array('\\', '/'), '_', trim($this->directory, '/')).'_';
+		}
 
-		// A new action is about to be run
-		$controller->before($this->method);
+		// Start benchmarking
+		$benchmark = Profiler::start('Requests', $this->uri);
 
-		// Set the action name after running before() to allow the controller
-		// to change the action based on the current parameters
-		$action = 'action_'.$this->action;
+		try
+		{
+			// Load the controller using reflection
+			$class = new ReflectionClass($prefix.$this->controller);
 
-		// Execute the action
-		$controller->$action();
+			// Create a new instance of the controller
+			$controller = $class->newInstance($this);
 
-		// The action has been run
-		$controller->after($this->method);
+			// Execute the "before action" method
+			$class->getMethod('before')->invoke($controller);
 
-		if ($capture === TRUE)
-			return $this->response;
+			// Execute the main action with the parameters
+			$class->getMethod('action_'.$this->action)->invokeArgs($controller, $this->_params);
 
-		// Send the headers
-		$this->send_headers();
+			// Execute the "after action" method
+			$class->getMethod('after')->invoke($controller);
+		}
+		catch (Exception $e)
+		{
+			// Delete the benchmark, it is invalid
+			Profiler::delete($benchmark);
 
-		// Send the response
-		echo $this->response;
+			if ($e instanceof ReflectionException)
+			{
+				// Reflection will throw exceptions for missing classes or actions
+				$this->status = 404;
+			}
+			else
+			{
+				// All other exceptions are PHP/server errors
+				$this->status = 500;
+			}
+
+			// Re-throw the exception
+			throw $e;
+		}
+
+		// Stop the benchmark
+		Profiler::stop($benchmark);
+
+		return $this;
 	}
 
 } // End Request

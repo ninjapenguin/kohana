@@ -1,3 +1,12 @@
 [submodule "modules/todoist"]
 	path = modules/todoist
 	url = git://github.com/shadowhand/kohana-todoist.git
+[submodule "modules/pagination"]
+	path = modules/pagination
+	url = git://github.com/GeertDD/kohana-pagination.git
+[submodule "modules/image"]
+	path = modules/image
+	url = git://github.com/shadowhand/kohana-image.git
+[submodule "modules/paypal"]
+	path = modules/paypal
+	url = git://github.com/shadowhand/kohana-paypal.git

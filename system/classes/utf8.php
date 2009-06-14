@@ -1,4 +1,4 @@
-<?php
+<?php defined('SYSPATH') or die('No direct script access.');
 /**
  * A port of [phputf8][ref-p8] to a unified set of files. Provides multi-byte
  * aware replacement string functions.
@@ -27,7 +27,7 @@
 final class utf8 {
 
 	// Does the server support UTF-8 natively?
-	public static $server_utf8 = FALSE;
+	public static $server_utf8 = NULL;
 
 	// Called methods
 	public static $called = array();
@@ -703,4 +703,15 @@ final class utf8 {
 		return _from_unicode($arr);
 	}
 
+	private function __construct()
+	{
+		// This is a static class
+	}
+
 } // End utf8
+
+if (utf8::$server_utf8 === NULL)
+{
+	// Determine if this server supports UTF-8 natively
+	utf8::$server_utf8 = extension_loaded('mbstring');
+}

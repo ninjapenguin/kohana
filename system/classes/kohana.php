@@ -24,7 +24,20 @@ final class Kohana {
 	const INFO  = 'INFO';
 
 	// Security check that is added to all generated PHP files
-	const PHP_HEADER = '<?php defined(\'SYSPATH\') or die(\'No direct script access.\');';
+	const FILE_SECURITY = '<?php defined(\'SYSPATH\') or die(\'No direct script access.\');';
+
+	// Format of cache files: header, cache name, and data
+	const FILE_CACHE = ":header \n\n// :name\n\n:data\n";
+
+	/**
+	 * @var  string  current environment name
+	 */
+	public static $environment = 'development';
+
+	/**
+	 * @var  boolean  enable core profiling
+	 */
+	public static $profile = TRUE;
 
 	/**
 	 * @var  boolean  command line environment?
@@ -42,11 +55,6 @@ final class Kohana {
 	public static $magic_quotes = FALSE;
 
 	/**
-	 * @var  boolean  display errors and exceptions in output?
-	 */
-	public static $display_errors = TRUE;
-
-	/**
 	 * @var  boolean  log errors and exceptions?
 	 */
 	public static $log_errors = FALSE;
@@ -62,9 +70,14 @@ final class Kohana {
 	public static $base_url = '/';
 
 	/**
-	 * @var  boolean  cache the location of files across requests?
+	 * @var  string  application index file
 	 */
-	public static $cache_paths = FALSE;
+	public static $index_file = 'index.php';
+
+	/**
+	 * @var  boolean  enabling internal caching?
+	 */
+	public static $caching = FALSE;
 
 	/**
 	 * @var  object  logging object
@@ -102,6 +115,18 @@ final class Kohana {
 
 		// This function can only be run once
 		if ($_init === TRUE) return;
+
+		if (isset($settings['profile']))
+		{
+			// Enable profiling
+			self::$profile = (bool) $settings['profile'];
+		}
+
+		if (self::$profile === TRUE)
+		{
+			// Start a new benchmark
+			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
+		}
 
 		// The system will now be initialized
 		$_init = TRUE;
@@ -150,16 +175,10 @@ final class Kohana {
 		// Determine if we are running in a Windows environment
 		self::$is_windows = (DIRECTORY_SEPARATOR === '\\');
 
-		if (isset($settings['display_errors']))
+		if (isset($settings['caching']))
 		{
-			// Enable or disable the display of errors
-			self::$display_errors = (bool) $settings['display_errors'];
-		}
-
-		if (isset($settings['cache_paths']))
-		{
-			// Enable or disable the caching of paths
-			self::$cache_paths = (bool) $settings['cache_paths'];
+			// Enable or disable internal caching
+			self::$caching = (bool) $settings['caching'];
 		}
 
 		if (isset($settings['charset']))
@@ -174,6 +193,12 @@ final class Kohana {
 			self::$base_url = rtrim($settings['base_url'], '/').'/';
 		}
 
+		if (isset($settings['index_file']))
+		{
+			// Set the index file
+			self::$index_file = trim($settings['index_file'], '/');
+		}
+
 		// Determine if the extremely evil magic quotes are enabled
 		self::$magic_quotes = (bool) get_magic_quotes_gpc();
 
@@ -185,13 +210,11 @@ final class Kohana {
 		// Load the logger
 		self::$log = Kohana_Log::instance();
 
-		// Determine if this server supports UTF-8 natively
-		utf8::$server_utf8 = extension_loaded('mbstring');
-
-		// Normalize all request variables to the current charset
-		$_GET    = utf8::clean($_GET, self::$charset);
-		$_POST   = utf8::clean($_POST, self::$charset);
-		$_COOKIE = utf8::clean($_COOKIE, self::$charset);
+		if (isset($benchmark))
+		{
+			// Stop benchmarking
+			Profiler::stop($benchmark);
+		}
 	}
 
 	/**
@@ -246,6 +269,12 @@ final class Kohana {
 	 */
 	public static function auto_load($class)
 	{
+		if (self::$profile === TRUE AND class_exists('Profiler', FALSE))
+		{
+			// Start a benchmark
+			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
+		}
+
 		// Transform the class name into a path
 		$file = str_replace('_', '/', strtolower($class));
 
@@ -267,7 +296,10 @@ final class Kohana {
 		}
 		elseif (class_exists($class.'_Core', FALSE))
 		{
-			if (($extension = Kohana::cache('kohana_auto_extension '.$class)) === NULL)
+			// Set the extension cache key
+			$cache_key = 'kohana::auto_load('.$class.')';
+
+			if (($extension = Kohana::cache($cache_key)) === NULL)
 			{
 				// Class extension to be evaluated
 				$extension = 'class '.$class.' extends '.$class.'_Core { }';
@@ -282,12 +314,18 @@ final class Kohana {
 				}
 
 				// Cache the extension string so that Reflection will be avoided
-				Kohana::cache('kohana_auto_extension '.$class, $extension);
+				Kohana::cache($cache_key, $extension);
 			}
 
 			// Transparent class extensions are possible using eval. Not very
 			// clean, but it can be avoided by creating empty extension files.
 			eval($extension);
+		}
+
+		if (isset($benchmark))
+		{
+			// Stop the benchmark
+			Profiler::stop($benchmark);
 		}
 
 		return TRUE;
@@ -306,6 +344,12 @@ final class Kohana {
 	{
 		if ($modules === NULL)
 			return self::$_modules;
+
+		if (self::$profile === TRUE)
+		{
+			// Start a new benchmark
+			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
+		}
 
 		// Start a new list of include paths, APPPATH first
 		$paths = array(APPPATH);
@@ -326,6 +370,12 @@ final class Kohana {
 
 		// Finish the include paths by adding SYSPATH
 		$paths[] = SYSPATH;
+
+		if (isset($benchmark))
+		{
+			// Stop the benchmark
+			Profiler::stop($benchmark);
+		}
 
 		// Set the new include paths
 		self::$_paths = $paths;
@@ -354,17 +404,34 @@ final class Kohana {
 	 * @param   string   directory name (views, i18n, classes, extensions, etc.)
 	 * @param   string   filename with subdirectory
 	 * @param   string   extension to search for
-	 * @return  string   single file found
-	 * @return  FALSE    single file NOT found
-	 * @return  array    multiple files from the "config" or "i18n" directories
+	 * @return  array    file list from the "config" or "i18n" directories
+	 * @return  string   single file path
 	 */
 	public static function find_file($dir, $file, $ext = NULL)
 	{
+		if (self::$profile === TRUE AND class_exists('Profiler', FALSE))
+		{
+			// Start a new benchmark
+			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
+		}
+
 		// Use the defined extension by default
 		$ext = ($ext === NULL) ? EXT : '.'.$ext;
 
 		// Create a partial path of the filename
 		$path = $dir.'/'.$file.$ext;
+
+		if (self::$caching === TRUE)
+		{
+			// Set the cache key for this path
+			$cache_key = 'Kohana::find_file("'.$path.'")';
+
+			if (($found = self::cache($cache_key)) !== NULL)
+			{
+				// Return the cached path
+				return $found;
+			}
+		}
 
 		if ($dir === 'config' OR $dir === 'i18n')
 		{
@@ -400,6 +467,92 @@ final class Kohana {
 				}
 			}
 		}
+
+		if (isset($cache_key))
+		{
+			// Save the path cache
+			Kohana::cache($cache_key, $found);
+		}
+
+		if (isset($benchmark))
+		{
+			// Stop the benchmark
+			Profiler::stop($benchmark);
+		}
+
+		return $found;
+	}
+
+	/**
+	 * Recursively finds all of the files in the specified directory.
+	 *
+	 *     $views = Kohana::list_files('views');
+	 *
+	 * @param   string  directory name
+	 * @return  array
+	 */
+	public static function list_files($directory = NULL)
+	{
+		if ( ! empty($directory))
+		{
+			// Add the directory separator
+			$directory .= DIRECTORY_SEPARATOR;
+		}
+
+		// Create an array for the files
+		$found = array();
+
+		foreach (self::$_paths as $path)
+		{
+			if (is_dir($path.$directory))
+			{
+				// Create a new directory iterator
+				$dir = new DirectoryIterator($path.$directory);
+
+				foreach ($dir as $file)
+				{
+					// Get the file name
+					$filename = $file->getFilename();
+
+					if ($filename[0] === '.')
+					{
+						// Skip all hidden files
+						continue;
+					}
+
+					// Relative filename is the array key
+					$key = $directory.$filename;
+
+					if ($file->isDir())
+					{
+						if ($sub_dir = self::list_files($key))
+						{
+							if (isset($found[$key]))
+							{
+								// Append the sub-directory list
+								$found[$key] += $sub_dir;
+							}
+							else
+							{
+								// Create a new sub-directory list
+								$found[$key] = $sub_dir;
+							}
+						}
+					}
+					else
+					{
+						if ( ! isset($found[$key]))
+						{
+							// Add new files to the list
+							$found[$key] = realpath($file->getPathName());
+						}
+					}
+				}
+			}
+		}
+
+		// Sort the results alphabetically
+		ksort($found);
 
 		return $found;
 	}
@@ -455,7 +608,7 @@ final class Kohana {
 		$file = sha1($name).EXT;
 
 		// Cache directories are split by keys to prevent filesystem overload
-		$dir = APPPATH."cache/{$file[0]}/";
+		$dir = APPPATH."cache/{$file[0]}{$file[1]}/";
 
 		if ($data === NULL)
 		{
@@ -479,11 +632,19 @@ final class Kohana {
 
 		if ( ! is_dir($dir))
 		{
-			// Create the cache directory
-			mkdir($dir, 0777, TRUE);
+			try
+			{
+				// Create the cache directory
+				mkdir($dir, 0777, TRUE);
 
-			// Set permissions (must be manually set to fix umask issues)
-			chmod($dir, 0777);
+				// Set permissions (must be manually set to fix umask issues)
+				chmod($dir, 0777);
+			}
+			catch (Exception $e)
+			{
+				throw new Kohana_Exception('Directory :dir must be writable',
+					array(':dir' => Kohana::debug_path(APPPATH.'cache')));
+			}
 		}
 
 		if ( ! is_file($dir.$file))
@@ -495,11 +656,13 @@ final class Kohana {
 			chmod($dir.$file, 0666);
 		}
 
-		// Convert the data to a string representation
-		$data = var_export($data, TRUE);
-
 		// Write the cache
-		return (bool) file_put_contents($dir.$file, self::PHP_HEADER."\n\nreturn {$data};");
+		return (bool) file_put_contents($dir.$file, strtr(self::FILE_CACHE, array
+		(
+			':header' => self::FILE_SECURITY,
+			':name'   => $name,
+			':data'   => 'return '.var_export($data, TRUE).';',
+		)));
 	}
 
 	/**

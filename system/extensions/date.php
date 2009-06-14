@@ -1,3 +1,3 @@
 <?php defined('SYSPATH') or die('No direct script access.');
 
-return array();
+class date extends date_Core {}
