@@ -205,7 +205,6 @@ class Request_Core {
 	/**
 	 * Creates a new request object for the given URI.
 	 *
-	 * @chainable
 	 * @param   string  URI of the request
 	 * @return  Request
 	 */
@@ -447,7 +446,17 @@ class Request_Core {
 			}
 		}
 
-		throw new Kohana_Exception('Unable to find a route to handle :uri', array(':uri' => $uri));
+		throw new Request_Exception('Unable to find a route to handle :uri', array(':uri' => $uri));
+	}
+
+	/**
+	 * Returns the response as the string representation of a request.
+	 *
+	 * @return  string
+	 */
+	public function __toString()
+	{
+		return (string) $this->response;
 	}
 
 	/**
