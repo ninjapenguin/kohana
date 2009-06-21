@@ -15,8 +15,8 @@
 final class Kohana {
 
 	// Release version and codename
-	const VERSION   = '3.0';
-	const CODENAME  = 'renaissance';
+	const VERSION  = '3.0';
+	const CODENAME = 'renaissance';
 
 	// Log message types
 	const ERROR = 'ERROR';
@@ -35,17 +35,12 @@ final class Kohana {
 	public static $environment = 'development';
 
 	/**
-	 * @var  boolean  enable core profiling
-	 */
-	public static $profile = TRUE;
-
-	/**
 	 * @var  boolean  command line environment?
 	 */
 	public static $is_cli = FALSE;
 
 	/**
-	 * @var  boolean   Windows environment?
+	 * @var  boolean  Windows environment?
 	 */
 	public static $is_windows = FALSE;
 
@@ -80,6 +75,11 @@ final class Kohana {
 	public static $caching = FALSE;
 
 	/**
+	 * @var  boolean  enable core profiling?
+	 */
+	public static $profiling = TRUE;
+
+	/**
 	 * @var  object  logging object
 	 */
 	public static $log;
@@ -103,7 +103,7 @@ final class Kohana {
 	 *
 	 * > boolean "display_errors" : display errors and exceptions
 	 * > boolean "log_errors"     : log errors and exceptions
-	 * > boolean "cache_paths"    : cache the location of files between requests
+	 * > boolean "caching"        : cache the location of files between requests
 	 * > string  "charset"        : character set used for all input and output
 	 *
 	 * @param   array   global settings
@@ -119,10 +119,10 @@ final class Kohana {
 		if (isset($settings['profile']))
 		{
 			// Enable profiling
-			self::$profile = (bool) $settings['profile'];
+			self::$profiling = (bool) $settings['profile'];
 		}
 
-		if (self::$profile === TRUE)
+		if (self::$profiling === TRUE)
 		{
 			// Start a new benchmark
 			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
@@ -220,7 +220,7 @@ final class Kohana {
 	/**
 	 * Recursively sanitizes an input variable:
 	 *
-	 * - Removes slashes if magic quotes are enabled
+	 * - Strips slashes if magic quotes are enabled
 	 * - Normalizes all newlines to LF
 	 *
 	 * @param   mixed  any variable
@@ -269,12 +269,6 @@ final class Kohana {
 	 */
 	public static function auto_load($class)
 	{
-		if (self::$profile === TRUE AND class_exists('Profiler', FALSE))
-		{
-			// Start a benchmark
-			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
-		}
-
 		// Transform the class name into a path
 		$file = str_replace('_', '/', strtolower($class));
 
@@ -282,53 +276,13 @@ final class Kohana {
 		{
 			// Load the class file
 			require $path;
-		}
-		else
-		{
-			// Class is not in the filesystem
-			return FALSE;
+
+			// Class has been found
+			return TRUE;
 		}
 
-		if ($path = self::find_file('extensions', $file))
-		{
-			// Load the extension file
-			require $path;
-		}
-		elseif (class_exists($class.'_Core', FALSE))
-		{
-			// Set the extension cache key
-			$cache_key = 'kohana::auto_load('.$class.')';
-
-			if (($extension = Kohana::cache($cache_key)) === NULL)
-			{
-				// Class extension to be evaluated
-				$extension = 'class '.$class.' extends '.$class.'_Core { }';
-
-				// Use reflection to find out of the class is abstract
-				$class = new ReflectionClass($class.'_Core');
-
-				if ($class->isAbstract())
-				{
-					// Make the extension abstract, too
-					$extension = 'abstract '.$extension;
-				}
-
-				// Cache the extension string so that Reflection will be avoided
-				Kohana::cache($cache_key, $extension);
-			}
-
-			// Transparent class extensions are possible using eval. Not very
-			// clean, but it can be avoided by creating empty extension files.
-			eval($extension);
-		}
-
-		if (isset($benchmark))
-		{
-			// Stop the benchmark
-			Profiler::stop($benchmark);
-		}
-
-		return TRUE;
+		// Class is not in the filesystem
+		return FALSE;
 	}
 
 	/**
@@ -345,7 +299,7 @@ final class Kohana {
 		if ($modules === NULL)
 			return self::$_modules;
 
-		if (self::$profile === TRUE)
+		if (self::$profiling === TRUE)
 		{
 			// Start a new benchmark
 			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
@@ -371,17 +325,28 @@ final class Kohana {
 		// Finish the include paths by adding SYSPATH
 		$paths[] = SYSPATH;
 
+		// Set the new include paths
+		self::$_paths = $paths;
+
+		// Set the current module list
+		self::$_modules = $modules;
+
+		foreach (self::$_modules as $path)
+		{
+			if (is_file($path.'/init'.EXT))
+			{
+				// Include the module initialization file once
+				require_once $path.'/init'.EXT;
+			}
+		}
+
 		if (isset($benchmark))
 		{
 			// Stop the benchmark
 			Profiler::stop($benchmark);
 		}
 
-		// Set the new include paths
-		self::$_paths = $paths;
-
-		// Set the current module list
-		return self::$_modules = $modules;
+		return self::$_modules;
 	}
 
 	/**
@@ -409,7 +374,7 @@ final class Kohana {
 	 */
 	public static function find_file($dir, $file, $ext = NULL)
 	{
-		if (self::$profile === TRUE AND class_exists('Profiler', FALSE))
+		if (self::$profiling === TRUE AND class_exists('Profiler', FALSE))
 		{
 			// Start a new benchmark
 			$benchmark = Profiler::start(__CLASS__, __FUNCTION__);
@@ -493,7 +458,7 @@ final class Kohana {
 	 */
 	public static function list_files($directory = NULL)
 	{
-		if ( ! empty($directory))
+		if ($directory !== NULL)
 		{
 			// Add the directory separator
 			$directory .= DIRECTORY_SEPARATOR;
@@ -669,8 +634,8 @@ final class Kohana {
 	 * PHP error handler, converts all errors into ErrorExceptions. This handler
 	 * respects error_reporting settings.
 	 *
-	 * @throws   ErrorException
-	 * @return   TRUE
+	 * @throws  ErrorException
+	 * @return  TRUE
 	 */
 	public static function error_handler($code, $error, $file = NULL, $line = NULL)
 	{
@@ -721,7 +686,7 @@ final class Kohana {
 
 			if ($e instanceof ErrorException AND version_compare(PHP_VERSION, '5.3', '<'))
 			{
-				// Work around for a bug in ErrorException::getTrace() that exists in
+				// Workaround for a bug in ErrorException::getTrace() that exists in
 				// all PHP 5.2 versions. @see http://bugs.php.net/bug.php?id=45895
 				for ($i = count($trace) - 1; $i > 0; --$i)
 				{
@@ -799,7 +764,7 @@ final class Kohana {
 					$var = $var ? 'TRUE' : 'FALSE';
 				break;
 				default:
-					$var = htmlspecialchars(print_r($var, TRUE), NULL, self::$charset, TRUE);
+					$var = htmlspecialchars(print_r($var, TRUE), ENT_NOQUOTES, self::$charset);
 				break;
 			}
 
@@ -873,7 +838,7 @@ final class Kohana {
 			if ($line >= $range['start'])
 			{
 				// Trim whitespace and sanitize the row
-				$row = htmlspecialchars(rtrim($row));
+				$row = htmlspecialchars(rtrim($row), ENT_NOQUOTES, self::$charset);
 
 				if ($line === $line_number)
 				{
@@ -918,7 +883,7 @@ final class Kohana {
 				return 'object '.get_class($var);
 			break;
 			case 'array':
-				if (arr::is_assoc($var))
+				if (Arr::is_assoc($var))
 					return print_r($var, TRUE);
 
 				return 'array('.implode(', ', array_map(array(__CLASS__, __FUNCTION__), $var)).')';
@@ -981,7 +946,7 @@ final class Kohana {
 				else
 				{
 					// Sanitize the function arguments
-					$function .= '('.implode(', ', $args = array_map('Kohana::debug_var', $step['args'])).')';
+					$function .= '('.implode(', ', $args = array_map(array('Kohana', 'debug_var'), $step['args'])).')';
 				}
 			}
 

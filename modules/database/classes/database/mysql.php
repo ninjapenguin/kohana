@@ -7,22 +7,28 @@
  * @copyright  (c) 2008-2009 Kohana Team
  * @license    http://kohanaphp.com/license.html
  */
-class Database_MySQL_Core extends Database {
+class Database_MySQL extends Database {
 
-	protected $_config_required = array('hostname', 'username', 'database');
-
-	// Database name
-	protected $_database;
+	// MySQL uses a backtick for identifiers
+	protected $_identifier = '`';
 
 	public function connect()
 	{
 		if ($this->_connection)
 			return;
 
-		extract($this->_config);
+		// Extract the connection parameters, adding required variabels
+		extract($this->_config['connection'] + array(
+			'hostname'   => '',
+			'port'       => NULL,
+			'socket'     => NULL,
+			'username'   => '',
+			'password'   => '',
+			'persistent' => FALSE,
+		));
 
-		// Clear the configuration for security
-		$this->_config = array();
+		// Clear the connection parameters for security
+		unset($this->_config['connection']);
 
 		// Set the connection type
 		$connect = empty($persistent) ? 'mysql_connect' : 'mysql_pconnect';
@@ -38,10 +44,12 @@ class Database_MySQL_Core extends Database {
 			$this->_connection = NULL;
 
 			// Unable to connect to the database
-			throw new Database_Exception(mysql_errno(), mysql_error());
+			throw new Database_Exception(':error',
+				array(':error' => mysql_error()),
+				mysql_errno());
 		}
 
-		if ( ! mysql_select_db($database, $this->_connection))
+		if ( ! mysql_select_db($this->_config['database'], $this->_connection))
 		{
 			// Unable to select database
 			throw new Database_Exception(':error',
@@ -49,13 +57,10 @@ class Database_MySQL_Core extends Database {
 				mysql_errno($this->_connection));
 		}
 
-		// Store the database name for use by meta functions
-		$this->_database = $database;
-
-		if (isset($charset))
+		if ( ! empty($this->_config['charset']))
 		{
 			// Set the character set
-			$this->set_charset($charset);
+			$this->set_charset($this->_config['charset']);
 		}
 	}
 
@@ -130,9 +135,6 @@ class Database_MySQL_Core extends Database {
 
 	public function list_tables($like = NULL)
 	{
-		// Make sure the database is connected
-		$this->_connection or $this->connect();
-
 		if (is_string($like))
 		{
 			// Search for table names
@@ -154,13 +156,21 @@ class Database_MySQL_Core extends Database {
 		return $tables;
 	}
 
-	public function list_columns($table)
+	public function list_columns($table, $like = NULL)
 	{
-		// Make sure the database is connected
-		$this->_connection or $this->connect();
+		// Quote the table name
+		$table = $this->quote_identifier($table);
 
-		// Find all table names
-		$result = $this->query(Database::SELECT, 'SHOW COLUMNS FROM '.$table)->as_array();
+		if (is_string($like))
+		{
+			// Search for column names
+			$result = $this->query(Database::SELECT, 'SHOW COLUMNS FROM '.$table.' LIKE '.$this->quote($like));
+		}
+		else
+		{
+			// Find all column names
+			$result = $this->query(Database::SELECT, 'SHOW COLUMNS FROM '.$table)->as_array();
+		}
 
 		$columns = array();
 		foreach ($result as $row)
@@ -185,18 +195,6 @@ class Database_MySQL_Core extends Database {
 		}
 
 		return $value;
-	}
-
-	public function quote_column($column, $alias = NULL)
-	{
-		$column = '`'.$column.'`';
-
-		if ($alias !== NULL)
-		{
-			$column .= ' AS `'.$alias.'`';
-		}
-
-		return $column;
 	}
 
 } // End Database_Connection_MySQL

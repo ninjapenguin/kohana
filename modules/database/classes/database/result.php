@@ -7,10 +7,15 @@
  * @copyright  (c) 2008-2009 Kohana Team
  * @license    http://kohanaphp.com/license.html
  */
-abstract class Database_Result_Core implements Countable, Iterator, SeekableIterator, ArrayAccess {
+abstract class Database_Result implements Countable, Iterator, SeekableIterator, ArrayAccess {
 
+	// Executed SQL for this result
+	protected $_query;
+
+	// Raw result resource
 	protected $_result;
 
+	// Total number of rows and current row
 	protected $_total_rows  = 0;
 	protected $_current_row = 0;
 
@@ -21,7 +26,14 @@ abstract class Database_Result_Core implements Countable, Iterator, SeekableIter
 	 * @param   string  SQL query
 	 * @return  void
 	 */
-	abstract public function __construct($result, $sql);
+	public function __construct($result, $sql)
+	{
+		// Store the result locally
+		$this->_result = $result;
+
+		// Store the SQL locally
+		$this->_query = $sql;
+	}
 
 	/**
 	 * Result destruction cleans up all open result sets.
@@ -29,19 +41,25 @@ abstract class Database_Result_Core implements Countable, Iterator, SeekableIter
 	abstract public function __destruct();
 
 	/**
-	 * Return all of the results in an array.
+	 * Return all of the rows in the result as an array.
+	 *
+	 * @return  array
 	 */
 	abstract public function as_array();
 
 	/**
 	 * Return the named column from the current row.
+	 *
+	 * @param   string  column to get
+	 * @param   mixed   default value if the column does not exist
+	 * @return  mixed
 	 */
-	public function get($name)
+	public function get($name, $default = NULL)
 	{
 		// Get the current row
 		$row = $this->current();
 
-		return $row[$name];
+		return array_key_exists($name, $row) ? $row[$name] : $default;
 	}
 
 	/**

@@ -7,7 +7,7 @@
  * @copyright  (c) 2008-2009 Kohana Team
  * @license    http://kohanaphp.com/license.html
  */
-class Kohana_Config_Core extends ArrayObject {
+class Kohana_Config extends ArrayObject {
 
 	/**
 	 * Loads all of the files in a configuration group and returns a merged
@@ -55,7 +55,7 @@ class Kohana_Config_Core extends ArrayObject {
 		if ($cache === NULL)
 		{
 			// Use the global caching
-			$cache = Kohana::$cached;
+			$cache = Kohana::$caching;
 		}
 
 		if ($cache === FALSE)
