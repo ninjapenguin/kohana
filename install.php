@@ -78,6 +78,7 @@
 			<?php else: $failed = TRUE ?>
 				<td class="fail">The <code><?php echo APPPATH.'logs/' ?></code> directory is not writable.</td>
 			<?php endif ?>
+		</tr>
 		<tr>
 			<th>PCRE UTF-8</th>
 			<?php if ( ! @preg_match('/^.$/u', 'ñ')): $failed = TRUE ?>
@@ -175,7 +176,7 @@
 			<?php if (function_exists('gd_info')): ?>
 				<td class="pass">Pass</td>
 			<?php else: ?>
-				<td class="fail">Kohana requires <a href="http://php.net/pdo">GD</a> v2 for the Image class.</td>
+				<td class="fail">Kohana requires <a href="http://php.net/gd">GD</a> v2 for the Image class.</td>
 			<?php endif ?>
 		</tr>
 		<tr>

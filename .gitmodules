@@ -16,6 +16,9 @@
 [submodule "modules/pagination"]
 	path = modules/pagination
 	url = git://github.com/kohana/pagination.git
-[submodule "modules/unittest"]
-	path = modules/unittest
-	url = git://github.com/kohana/unittest.git
+[submodule "modules/auth"]
+	path = modules/auth
+	url = git://github.com/kohana/auth.git
+[submodule "modules/userguide"]
+	path = modules/userguide
+	url = git://github.com/kohana/userguide.git
